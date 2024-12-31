@@ -102,3 +102,42 @@ if __name__ == "__main__":
     main()
     # Run the tests
     unittest.main(argv=[''], exit=False)
+
+
+class TestOpenRouter(unittest.TestCase):
+    def setUp(self):
+        self.test_api_key = "test_key"
+        os.environ["OPENROUTER_API_KEY"] = self.test_api_key
+        os.environ["MODEL_PROVIDER"] = "openrouter"
+        os.environ["SELECTED_MODEL"] = "anthropic/claude-3-opus-20240229"
+
+    @patch('httpx.AsyncClient')
+    async def test_openrouter_client_initialization(self, mock_client):
+        client = OpenRouterClient(self.test_api_key)
+        self.assertEqual(client.api_key, self.test_api_key)
+        self.assertEqual(client.base_url, Config.OPENROUTER_BASE_URL)
+
+    @patch('httpx.AsyncClient')
+    async def test_create_chat_completion(self, mock_client):
+        mock_response = AsyncMock()
+        mock_response.json.return_value = {"choices": [{"message": {"content": "Test response"}}]}
+        mock_response.raise_for_status.return_value = None
+        mock_client.return_value.__aenter__.return_value.post.return_value = mock_response
+
+        client = OpenRouterClient(self.test_api_key)
+        response = await client.create_chat_completion(
+            messages=[{"role": "user", "content": "Hello"}],
+            model="anthropic/claude-3-opus-20240229"
+        )
+        
+        self.assertIn("choices", response)
+
+    def test_model_selection(self):
+        self.assertIn("anthropic/claude-3-opus-20240229", Config.AVAILABLE_MODELS["openrouter"])
+        self.assertTrue(Config.SELECTED_MODEL in Config.AVAILABLE_MODELS["openrouter"])
+
+    def tearDown(self):
+        # Clean up environment variables
+        del os.environ["OPENROUTER_API_KEY"]
+        del os.environ["MODEL_PROVIDER"]
+        del os.environ["SELECTED_MODEL"]
