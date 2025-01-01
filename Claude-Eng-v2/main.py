@@ -261,11 +261,23 @@ def setup_virtual_environment() -> Tuple[str, str]:
         logging.error(f"Error setting up virtual environment: {str(e)}")
         raise
 
-# Initialize the Anthropic client
-anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-if not anthropic_api_key:
-    raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
-client = Anthropic(api_key=anthropic_api_key)
+# Add these imports at the top
+from openrouter_client import OpenRouterClient
+from config import Config
+import aiohttp
+
+# Replace the Anthropic client initialization with this
+if Config.MODEL_PROVIDER == 'anthropic':
+    if not Config.ANTHROPIC_API_KEY:
+        raise ValueError("ANTHROPIC_API_KEY not found in environment variables")
+    client = Anthropic(api_key=Config.ANTHROPIC_API_KEY)
+else:
+    if not Config.OPENROUTER.API_KEY:
+        raise ValueError("OPENROUTER_API_KEY not found in environment variables")
+    client = OpenRouterClient(
+        api_key=Config.OPENROUTER.API_KEY,
+        base_url=Config.OPENROUTER.BASE_URL
+    )
 
 # Initialize the Tavily client
 tavily_api_key = os.getenv("TAVILY_API_KEY")
@@ -1751,27 +1763,41 @@ async def chat_with_claude(user_input, image_path=None, current_iteration=None, 
 
     for attempt in range(max_retries):
         try:
-            # MAINMODEL call with prompt caching
-            response = client.beta.prompt_caching.messages.create(
-                model=MAINMODEL,
-                max_tokens=8000,
-                system=[
-                    {
-                        "type": "text",
-                        "text": update_system_prompt(current_iteration, max_iterations),
-                        "cache_control": {"type": "ephemeral"}
-                    },
-                    {
-                        "type": "text",
-                        "text": json.dumps(tools),
-                        "cache_control": {"type": "ephemeral"}
-                    }
-                ],
-                messages=messages,
-                tools=tools,
-                tool_choice={"type": "auto"},
-                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
-            )
+            if Config.MODEL_PROVIDER == 'anthropic':
+                # Existing Anthropic API call
+                response = client.beta.prompt_caching.messages.create(
+                    model=MAINMODEL,
+                    max_tokens=8000,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": update_system_prompt(current_iteration, max_iterations),
+                            "cache_control": {"type": "ephemeral"}
+                        },
+                        {
+                            "type": "text",
+                            "text": json.dumps(tools),
+                            "cache_control": {"type": "ephemeral"}
+                        }
+                    ],
+                    messages=messages,
+                    tools=tools,
+                    tool_choice={"type": "auto"},
+                    extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
+                )
+            else:
+                # OpenRouter API call
+                response = await client.create_chat_completion(
+                    model=Config.MODEL,
+                    messages=[
+                        {"role": "system", "content": update_system_prompt(current_iteration, max_iterations)},
+                        {"role": "system", "content": json.dumps(tools)},
+                        *messages
+                    ],
+                    max_tokens=8000,
+                    tools=tools,
+                    tool_choice={"type": "auto"}
+                )
             # Update token usage for MAINMODEL
             main_model_tokens['input'] += response.usage.input_tokens
             main_model_tokens['output'] += response.usage.output_tokens
