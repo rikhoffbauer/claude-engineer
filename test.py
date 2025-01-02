@@ -98,7 +98,73 @@ class TestCalculateMedian(unittest.TestCase):
         """Test with negative numbers."""
         self.assertEqual(calculate_median([-1, -2, -3]), -2)
 
-if __name__ == "__main__":
+# Add to existing test.py
+import unittest
+from unittest.mock import patch, MagicMock
+from openrouter_client import OpenRouterClient
+from config import Config
+
+class TestOpenRouterIntegration(unittest.TestCase):
+    def setUp(self):
+        self.api_key = "test_key"
+        self.client = OpenRouterClient(api_key=self.api_key)
+
+    @patch('aiohttp.ClientSession.post')
+    async def test_create_chat_completion(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json.return_value = {"choices": [{"message": "Test response"}]}
+        mock_post.return_value.__aenter__.return_value = mock_response
+
+        response = await self.client.create_chat_completion(
+            model="test-model",
+            messages=[{"role": "user", "content": "Hello"}]
+        )
+        
+        self.assertIn("choices", response)
+
+    @patch('aiohttp.ClientSession.post')
+    async def test_create_chat_completion_with_caching(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": "Test response"}],
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_creation_input_tokens": 8,
+            "cache_read_input_tokens": 2
+        }
+        mock_post.return_value.__aenter__.return_value = mock_response
+
+        response = await self.client.create_chat_completion(
+            model="test-model",
+            messages=[{"role": "user", "content": "Hello"}],
+            cache_control={"type": "ephemeral"}
+        )
+        
+        self.assertIn("choices", response)
+        self.assertIn("usage", response)
+        self.assertEqual(response["usage"]["input_tokens"], 10)
+        self.assertEqual(response["usage"]["cache_creation_input_tokens"], 8)
+
+    @patch('aiohttp.ClientSession.get')
+    async def test_get_available_models(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json.return_value = [{"id": "model1"}, {"id": "model2"}]
+        mock_get.return_value.__aenter__.return_value = mock_response
+
+        models = await self.client.get_available_models()
+        
+        self.assertTrue(len(models) > 0)
+
+    def test_model_selection(self):
+        # Test model selection logic
+        with patch.dict('os.environ', {'MODEL_PROVIDER': 'openrouter', 'SELECTED_MODEL': 'claude-3-opus'}):
+            config = Config()
+            self.assertEqual(config.MODEL, OpenRouterConfig.AVAILABLE_MODELS['claude-3-opus'])
+
+if __name__ == '__main__':
     main()
     # Run the tests
     unittest.main(argv=[''], exit=False)
