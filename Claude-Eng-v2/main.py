@@ -1764,7 +1764,7 @@ async def chat_with_claude(user_input, image_path=None, current_iteration=None, 
     for attempt in range(max_retries):
         try:
             if Config.MODEL_PROVIDER == 'anthropic':
-                # Existing Anthropic API call
+                # Existing Anthropic API call with prompt caching
                 response = client.beta.prompt_caching.messages.create(
                     model=MAINMODEL,
                     max_tokens=8000,
@@ -1786,18 +1786,28 @@ async def chat_with_claude(user_input, image_path=None, current_iteration=None, 
                     extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
                 )
             else:
-                # OpenRouter API call
+                # OpenRouter API call with prompt caching
+                system_messages = [
+                    {
+                        "role": "system",
+                        "content": update_system_prompt(current_iteration, max_iterations),
+                        "cache_control": {"type": "ephemeral"}
+                    },
+                    {
+                        "role": "system",
+                        "content": json.dumps(tools),
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                ]
                 response = await client.create_chat_completion(
                     model=Config.MODEL,
-                    messages=[
-                        {"role": "system", "content": update_system_prompt(current_iteration, max_iterations)},
-                        {"role": "system", "content": json.dumps(tools)},
-                        *messages
-                    ],
+                    messages=[*system_messages, *messages],
                     max_tokens=8000,
                     tools=tools,
-                    tool_choice={"type": "auto"}
+                    tool_choice={"type": "auto"},
+                    cache_control={"type": "ephemeral"}  # Enable prompt caching for the entire request
                 )
+
             # Update token usage for MAINMODEL
             main_model_tokens['input'] += response.usage.input_tokens
             main_model_tokens['output'] += response.usage.output_tokens
